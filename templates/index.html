@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Translation Practice</title>
+<style>
+  body { font-family: Georgia, serif; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #222; line-height: 1.7; }
+  nav { margin-bottom: 32px; font-family: sans-serif; font-size: 14px; }
+  nav a { margin-right: 16px; text-decoration: none; color: #555; }
+  nav a:hover { color: #000; }
+  h1 { font-size: 1.5rem; margin-bottom: 8px; }
+  .step-label { font-family: sans-serif; font-size: 12px; font-weight: bold; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin: 28px 0 8px; display: flex; align-items: center; gap: 8px; }
+  .step-num { display: inline-flex; align-items: center; justify-content: center; background: #222; color: #fff; border-radius: 50%; width: 20px; height: 20px; font-size: 11px; flex-shrink: 0; }
+  .read-box { background: #f9f9f9; border: 1px dashed #ccc; border-radius: 6px; padding: 12px 16px; font-size: 14px; color: #555; margin-bottom: 8px; }
+  .body-text { color: #333; white-space: pre-wrap; border-left: 3px solid #eee; padding-left: 16px; margin: 8px 0 4px; font-size: 15px; }
+  .source-link { font-size: 12px; color: #aaa; margin-bottom: 4px; }
+  .source-link a { color: #aaa; }
+  textarea { width: 100%; box-sizing: border-box; padding: 10px; font-size: 15px; line-height: 1.6; border: 1px solid #ddd; border-radius: 4px; resize: vertical; margin-top: 4px; }
+  .actions { margin-top: 24px; display: flex; gap: 12px; }
+  button { padding: 10px 20px; font-size: 14px; cursor: pointer; border-radius: 4px; border: 1px solid #ccc; background: #fff; }
+  button[type=submit] { background: #222; color: #fff; border-color: #222; }
+  button[type=submit]:hover { background: #000; }
+  button.another:hover { background: #f5f5f5; }
+</style>
+</head>
+<body>
+<nav><a href="/">Practice</a><a href="/history">History</a></nav>
+
+{% if article %}
+<form method="post" action="/submit">
+
+  <div class="step-label"><span class="step-num">1</span> Read aloud</div>
+  <div class="read-box">Read this passage out loud — slowly, at least once. Don't skip it.</div>
+
+  <h1>{{ article.title }}</h1>
+  <div class="source-link"><a href="{{ article.url }}" target="_blank">Read full article ↗</a></div>
+  <div class="body-text">{{ article.body }}</div>
+
+  <input type="hidden" name="article_title" value="{{ article.title }}">
+  <input type="hidden" name="article_url" value="{{ article.url }}">
+  <input type="hidden" name="article_body" value="{{ article.body }}">
+
+  <div class="step-label"><span class="step-num">2</span> 翻译成中文</div>
+  <textarea name="chinese_translation" rows="7" placeholder="把上面这段话翻译成中文..."></textarea>
+
+  <div class="step-label"><span class="step-num">3</span> Back to English</div>
+  <textarea name="english_back_translation" rows="7" placeholder="Now translate your Chinese version back into English — without looking at the original..."></textarea>
+
+  <div class="actions">
+    <button type="submit">Save & finish ✓</button>
+    <a href="/"><button type="button" class="another">Give me another →</button></a>
+  </div>
+</form>
+{% else %}
+<p>Couldn't load an article. Check your internet connection and try refreshing.</p>
+{% endif %}
+</body>
+</html>

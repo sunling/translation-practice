@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review</title>
+<style>
+  body { font-family: Georgia, serif; max-width: 980px; margin: 40px auto; padding: 0 20px; color: #222; line-height: 1.8; }
+  nav { margin-bottom: 32px; font-family: sans-serif; font-size: 14px; }
+  nav a { margin-right: 16px; text-decoration: none; color: #555; }
+  nav a:hover { color: #000; }
+  h1 { font-size: 1.3rem; margin-bottom: 4px; }
+  .source-link { font-size: 12px; color: #aaa; margin-bottom: 28px; }
+  .source-link a { color: #aaa; }
+
+  .col-label { font-family: sans-serif; font-size: 11px; font-weight: bold; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .col-body { font-size: 14px; color: #333; line-height: 1.8; border-left: 3px solid #eee; padding-left: 14px; }
+
+  /* Top: Original EN | Back-translation EN */
+  .compare-en { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-bottom: 32px; }
+
+  /* Bottom: Your Chinese | Reference */
+  .compare-cn { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; border-top: 1px solid #eee; padding-top: 28px; margin-bottom: 36px; }
+  .ref-body { font-size: 14px; color: #bbb; line-height: 1.8; border-left: 3px solid #f3f3f3; padding-left: 14px; }
+
+  mark.miss { background: #fdd; color: inherit; border-radius: 2px; padding: 0 1px; }
+
+  .actions { display: flex; gap: 12px; font-family: sans-serif; }
+  a.btn { padding: 10px 20px; font-size: 14px; border-radius: 4px; background: #222; color: #fff; text-decoration: none; border: 1px solid #222; }
+  a.btn:hover { background: #000; }
+  a.btn-ghost { padding: 10px 20px; font-size: 14px; border-radius: 4px; border: 1px solid #ccc; color: #555; text-decoration: none; }
+  a.btn-ghost:hover { background: #f5f5f5; }
+</style>
+</head>
+<body>
+<nav><a href="/">Practice</a><a href="/history">History</a></nav>
+
+<h1>{{ session.title }}</h1>
+<div class="source-link"><a href="{{ session.url }}" target="_blank">Read full article ↗</a></div>
+
+<div class="compare-en">
+  <div>
+    <div class="col-label">Original &nbsp;<span style="font-weight:normal;color:#aaa;">red = missed in your back-translation</span></div>
+    <div class="col-body">{{ session.body_html | safe }}</div>
+  </div>
+  <div>
+    <div class="col-label">Your English back-translation</div>
+    <div class="col-body">{{ session.back_html | safe }}</div>
+  </div>
+</div>
+
+<div class="compare-cn">
+  <div>
+    <div class="col-label">你的中文翻译</div>
+    <div class="col-body">{{ session.cn }}</div>
+  </div>
+  {% if session.ref %}
+  <div>
+    <div class="col-label">参考译文（机器翻译）</div>
+    <div class="ref-body">{{ session.ref }}</div>
+  </div>
+  {% endif %}
+</div>
+
+<div class="actions">
+  <a class="btn" href="/">Practice again →</a>
+  <a class="btn-ghost" href="/history">History</a>
+</div>
+</body>
+</html>
