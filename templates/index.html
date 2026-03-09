@@ -21,6 +21,9 @@
   button[type=submit] { background: #222; color: #fff; border-color: #222; }
   button[type=submit]:hover { background: #000; }
   button.another:hover { background: #f5f5f5; }
+  .listen-btn { font-family: sans-serif; font-size: 13px; cursor: pointer; border: 1px solid #ddd; border-radius: 4px; padding: 5px 14px; background: #fff; color: #555; margin-top: 10px; }
+  .listen-btn:hover { background: #f5f5f5; }
+  .listen-btn.playing { border-color: #999; color: #222; background: #f0f0f0; }
 </style>
 </head>
 <body>
@@ -34,7 +37,8 @@
 
   <h1>{{ article.title }}</h1>
   <div class="source-link"><a href="{{ article.url }}" target="_blank">Read full article ↗</a></div>
-  <div class="body-text">{{ article.body }}</div>
+  <div class="body-text" id="article-body">{{ article.body }}</div>
+  <button type="button" class="listen-btn" id="listen-btn" onclick="toggleListen()">▶ Listen</button>
 
   <input type="hidden" name="article_title" value="{{ article.title }}">
   <input type="hidden" name="article_url" value="{{ article.url }}">
@@ -54,5 +58,27 @@
 {% else %}
 <p>Couldn't load an article. Check your internet connection and try refreshing.</p>
 {% endif %}
+<script>
+  function toggleListen() {
+    const btn = document.getElementById('listen-btn');
+    if (speechSynthesis.speaking) {
+      speechSynthesis.cancel();
+      btn.textContent = '▶ Listen';
+      btn.classList.remove('playing');
+      return;
+    }
+    const text = document.getElementById('article-body').innerText;
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'en-US';
+    utter.rate = 0.9;
+    utter.onend = () => {
+      btn.textContent = '▶ Listen';
+      btn.classList.remove('playing');
+    };
+    btn.textContent = '■ Stop';
+    btn.classList.add('playing');
+    speechSynthesis.speak(utter);
+  }
+</script>
 </body>
 </html>

@@ -3,7 +3,6 @@ import random
 import requests
 import re
 from pathlib import Path
-from datetime import datetime
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -95,8 +94,10 @@ def fetch_article():
             return None
         article = random.choice(results)
         raw = article["fields"]["body"]
+        import html as html_module
         body = re.sub(r"</p>", "\n\n", raw, flags=re.IGNORECASE)
         body = re.sub(r"<[^>]+>", "", body)
+        body = html_module.unescape(body)
         body = re.sub(r"\n{3,}", "\n\n", body).strip()
         body = extract_passage(body)
         return {
