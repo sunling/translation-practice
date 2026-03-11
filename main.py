@@ -190,13 +190,13 @@ async def review(request: Request, session_id: int):
 async def practice_again(request: Request, session_id: int):
     with sqlite3.connect(DB) as conn:
         row = conn.execute(
-            "SELECT article_title, article_url, article_body FROM sessions WHERE id=?",
+            "SELECT article_title, article_url, article_body, reference_translation FROM sessions WHERE id=?",
             (session_id,)
         ).fetchone()
     if not row:
         return RedirectResponse("/")
     article = {"title": row[0], "url": row[1], "body": row[2]}
-    return templates.TemplateResponse("index.html", {"request": request, "article": article})
+    return templates.TemplateResponse("index.html", {"request": request, "article": article, "prefill_cn": row[3] or ""})
 
 @app.get("/history", response_class=HTMLResponse)
 async def history(request: Request):

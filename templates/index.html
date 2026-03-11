@@ -45,7 +45,7 @@
   <input type="hidden" name="article_body" value="{{ article.body }}">
 
   <div class="step-label"><span class="step-num">2</span> 翻译成中文</div>
-  <textarea name="chinese_translation" rows="7" placeholder="把上面这段话翻译成中文..."></textarea>
+  <textarea name="chinese_translation" rows="7" placeholder="把上面这段话翻译成中文...">{{ prefill_cn | default('') }}</textarea>
 
   <div class="step-label"><span class="step-num">3</span> Back to English</div>
   <textarea name="english_back_translation" rows="7" placeholder="Now translate your Chinese version back into English — without looking at the original..."></textarea>
