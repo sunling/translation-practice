@@ -225,12 +225,21 @@ async def history(request: Request):
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT MAX(id) as latest_id, article_title, article_url, article_body,
-                       chinese_translation, english_back_translation,
-                       COUNT(*) as times, MAX(created_at) as last_date
-                FROM sessions
-                GROUP BY article_url, article_title
-                ORDER BY last_date DESC
+                WITH counts AS (
+                    SELECT article_url, COUNT(*) as times, MAX(created_at) as last_date
+                    FROM sessions GROUP BY article_url
+                ),
+                latest AS (
+                    SELECT DISTINCT ON (article_url)
+                        id, article_title, article_url, article_body,
+                        chinese_translation, english_back_translation
+                    FROM sessions ORDER BY article_url, created_at DESC
+                )
+                SELECT l.id, l.article_title, l.article_url, l.article_body,
+                       l.chinese_translation, l.english_back_translation,
+                       c.times, c.last_date
+                FROM latest l JOIN counts c ON l.article_url = c.article_url
+                ORDER BY c.last_date DESC
             """)
             rows = cur.fetchall()
     finally:
