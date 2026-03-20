@@ -1,4 +1,4 @@
-import sqlite3
+import os
 import random
 import requests
 import re
@@ -6,10 +6,12 @@ from pathlib import Path
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+import psycopg2
 
 app = FastAPI()
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
-DB = "practice.db"
+
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 GUARDIAN_URL = (
     "https://content.guardianapis.com/search"
@@ -19,32 +21,39 @@ GUARDIAN_URL = (
     "&order-by=newest"
 )
 
+def get_conn():
+    return psycopg2.connect(DATABASE_URL)
+
 def init_db():
-    with sqlite3.connect(DB) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                article_title TEXT,
-                article_url TEXT,
-                article_body TEXT,
-                chinese_translation TEXT,
-                english_back_translation TEXT,
-                reference_translation TEXT,
-                created_at TEXT DEFAULT (datetime('now'))
-            )
-        """)
-        # migrate: add column if it didn't exist yet
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()]
-        if "reference_translation" not in cols:
-            conn.execute("ALTER TABLE sessions ADD COLUMN reference_translation TEXT")
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id SERIAL PRIMARY KEY,
+                    article_title TEXT,
+                    article_url TEXT,
+                    article_body TEXT,
+                    chinese_translation TEXT,
+                    english_back_translation TEXT,
+                    reference_translation TEXT,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+        conn.commit()
+    finally:
+        conn.close()
 
 def get_stats():
-    with sqlite3.connect(DB) as conn:
-        rows = conn.execute(
-            "SELECT date(created_at) as d FROM sessions ORDER BY d DESC"
-        ).fetchall()
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT DATE(created_at) as d FROM sessions ORDER BY d DESC")
+            rows = cur.fetchall()
+    finally:
+        conn.close()
     import datetime as dt
-    dates = [r[0] for r in rows]
+    dates = [str(r[0]) for r in rows]
     total = len(dates)
     unique_days = sorted(set(dates), reverse=True)
     streak = 0
@@ -65,7 +74,6 @@ def extract_passage(text, target_words=80):
     paragraphs = [p.strip() for p in re.split(r"\n\n+", text) if len(p.split()) >= 20]
     if not paragraphs:
         return text[:1000]
-    # start from a random paragraph (bias toward early-to-mid)
     start = random.randint(0, max(0, len(paragraphs) - 1))
     kept, count = [], 0
     for p in paragraphs[start:]:
@@ -73,7 +81,6 @@ def extract_passage(text, target_words=80):
         count += len(p.split())
         if count >= target_words:
             break
-    # if we didn't hit target, prepend earlier paragraphs
     if count < target_words and start > 0:
         for p in reversed(paragraphs[:start]):
             kept.insert(0, p)
@@ -111,7 +118,6 @@ def fetch_article():
 def translate_to_chinese(text):
     try:
         from deep_translator import GoogleTranslator
-        # GoogleTranslator has a 5000 char limit per call
         return GoogleTranslator(source="en", target="zh-CN").translate(text[:4500])
     except Exception:
         return ""
@@ -132,12 +138,17 @@ async def submit(
     english_back_translation: str = Form(""),
 ):
     reference = translate_to_chinese(article_body)
-    with sqlite3.connect(DB) as conn:
-        cur = conn.execute(
-            "INSERT INTO sessions (article_title, article_url, article_body, chinese_translation, english_back_translation, reference_translation) VALUES (?,?,?,?,?,?)",
-            (article_title, article_url, article_body, chinese_translation, english_back_translation, reference),
-        )
-        session_id = cur.lastrowid
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO sessions (article_title, article_url, article_body, chinese_translation, english_back_translation, reference_translation) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+                (article_title, article_url, article_body, chinese_translation, english_back_translation, reference),
+            )
+            session_id = cur.fetchone()[0]
+        conn.commit()
+    finally:
+        conn.close()
     return RedirectResponse(f"/review/{session_id}", status_code=303)
 
 STOP_WORDS = {
@@ -170,11 +181,16 @@ def text_to_html(text):
 
 @app.get("/review/{session_id}", response_class=HTMLResponse)
 async def review(request: Request, session_id: int):
-    with sqlite3.connect(DB) as conn:
-        row = conn.execute(
-            "SELECT article_title, article_url, article_body, chinese_translation, english_back_translation, reference_translation FROM sessions WHERE id=?",
-            (session_id,)
-        ).fetchone()
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT article_title, article_url, article_body, chinese_translation, english_back_translation, reference_translation FROM sessions WHERE id=%s",
+                (session_id,)
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
     if not row:
         return RedirectResponse("/history")
     session = {
@@ -188,11 +204,16 @@ async def review(request: Request, session_id: int):
 
 @app.get("/practice-again/{session_id}", response_class=HTMLResponse)
 async def practice_again(request: Request, session_id: int):
-    with sqlite3.connect(DB) as conn:
-        row = conn.execute(
-            "SELECT article_title, article_url, article_body, reference_translation FROM sessions WHERE id=?",
-            (session_id,)
-        ).fetchone()
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT article_title, article_url, article_body, reference_translation FROM sessions WHERE id=%s",
+                (session_id,)
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
     if not row:
         return RedirectResponse("/")
     article = {"title": row[0], "url": row[1], "body": row[2]}
@@ -200,15 +221,20 @@ async def practice_again(request: Request, session_id: int):
 
 @app.get("/history", response_class=HTMLResponse)
 async def history(request: Request):
-    with sqlite3.connect(DB) as conn:
-        rows = conn.execute("""
-            SELECT MAX(id) as latest_id, article_title, article_url, article_body,
-                   chinese_translation, english_back_translation,
-                   COUNT(*) as times, MAX(created_at) as last_date
-            FROM sessions
-            GROUP BY article_url
-            ORDER BY last_date DESC
-        """).fetchall()
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT MAX(id) as latest_id, article_title, article_url, article_body,
+                       chinese_translation, english_back_translation,
+                       COUNT(*) as times, MAX(created_at) as last_date
+                FROM sessions
+                GROUP BY article_url, article_title
+                ORDER BY last_date DESC
+            """)
+            rows = cur.fetchall()
+    finally:
+        conn.close()
     sessions = [
         {"id": r[0], "title": r[1], "url": r[2], "body": r[3],
          "cn": r[4], "en": r[5], "times": r[6], "date": r[7]}

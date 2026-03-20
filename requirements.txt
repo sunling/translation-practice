@@ -4,3 +4,4 @@ jinja2
 requests
 python-multipart
 deep-translator
+psycopg2-binary
