@@ -42,6 +42,7 @@ The app automatically creates the required `sessions` table on startup.
 ## Running Locally
 
 ```bash
+conda activate ling
 uvicorn main:app --reload
 ```
 
