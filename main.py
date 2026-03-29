@@ -34,13 +34,22 @@ db_pool = None
 if DATABASE_URL:
     try:
         db_pool = psycopg2.pool.SimpleConnectionPool(1, 10, DATABASE_URL)
-    except Exception:
+        print(f"Database pool initialized with URL: {DATABASE_URL[:30]}...")
+    except Exception as e:
+        print(f"Failed to initialize database pool: {e}")
         db_pool = None
+else:
+    print("WARNING: DATABASE_URL not set. Running without database.")
 
 def get_conn():
     if db_pool:
-        return db_pool.getconn()
-    return psycopg2.connect(DATABASE_URL)
+        conn = db_pool.getconn()
+        # Ensure Unicode encoding for Chinese/Japanese characters
+        conn.set_client_encoding('UTF8')
+        return conn
+    conn = psycopg2.connect(DATABASE_URL)
+    conn.set_client_encoding('UTF8')
+    return conn
 
 def release_conn(conn):
     if db_pool:
@@ -73,6 +82,7 @@ GUARDIAN_URL = (
 def init_db():
     """Initialize database tables."""
     if not DATABASE_URL:
+        print("WARNING: DATABASE_URL not set. Database features will not work.")
         return
     try:
         with get_db() as conn:
@@ -86,9 +96,20 @@ def init_db():
                         chinese_translation TEXT,
                         english_back_translation TEXT,
                         reference_translation TEXT,
+                        source_type VARCHAR(20) DEFAULT 'guardian',
+                        source_lang VARCHAR(10) DEFAULT 'en',
+                        target_lang VARCHAR(10) DEFAULT 'en',
                         created_at TIMESTAMP DEFAULT NOW()
                     )
                 """)
+                # Migrate existing rows to have source_type
+                cur.execute("""
+                    ALTER TABLE sessions 
+                    ADD COLUMN IF NOT EXISTS source_type VARCHAR(20) DEFAULT 'guardian',
+                    ADD COLUMN IF NOT EXISTS source_lang VARCHAR(10) DEFAULT 'en',
+                    ADD COLUMN IF NOT EXISTS target_lang VARCHAR(10) DEFAULT 'en'
+                """)
+        print("Database initialized successfully")
     except Exception as e:
         print(f"Database initialization error: {e}")
 
@@ -102,27 +123,40 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"detail": "Invalid input. Please check your submission."}
     )
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {
+        "status": "ok",
+        "database": "connected" if DATABASE_URL else "not configured"
+    }
+
 def get_stats():
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT DATE(created_at) as d FROM sessions ORDER BY d DESC")
-            rows = cur.fetchall()
-    import datetime as dt
-    dates = [str(r[0]) for r in rows]
-    total = len(dates)
-    unique_days = sorted(set(dates), reverse=True)
-    streak = 0
-    today = dt.date.today()
-    for i, d in enumerate(unique_days):
-        expected = str(today - dt.timedelta(days=i))
-        if d == expected:
-            streak += 1
-        else:
-            break
-    weekday = today.weekday()
-    week_start = str(today - dt.timedelta(days=weekday))
-    this_week = sum(1 for d in unique_days if d >= week_start)
-    return {"total": total, "streak": streak, "this_week": this_week}
+    if not DATABASE_URL:
+        return {"total": 0, "streak": 0, "this_week": 0}
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT DATE(created_at) as d FROM sessions ORDER BY d DESC")
+                rows = cur.fetchall()
+        import datetime as dt
+        dates = [str(r[0]) for r in rows]
+        total = len(dates)
+        unique_days = sorted(set(dates), reverse=True)
+        streak = 0
+        today = dt.date.today()
+        for i, d in enumerate(unique_days):
+            expected = str(today - dt.timedelta(days=i))
+            if d == expected:
+                streak += 1
+            else:
+                break
+        weekday = today.weekday()
+        week_start = str(today - dt.timedelta(days=weekday))
+        this_week = sum(1 for d in unique_days if d >= week_start)
+        return {"total": total, "streak": streak, "this_week": this_week}
+    except Exception:
+        return {"total": 0, "streak": 0, "this_week": 0}
 
 def extract_passage(text, target_words=80):
     """Pick a random window of substantive paragraphs totalling ~target_words."""
@@ -216,6 +250,9 @@ async def submit(
     article_body: str = Form(""),
     chinese_translation: str = Form(""),
     english_back_translation: str = Form(""),
+    source_type: str = Form("guardian"),
+    source_lang: str = Form("en"),
+    target_lang: str = Form("en"),
 ):
     # Validation
     errors = []
@@ -224,18 +261,25 @@ async def submit(
     if not chinese_translation or len(chinese_translation.strip()) < 5:
         errors.append("Chinese translation is required (min 5 characters)")
     if not english_back_translation or len(english_back_translation.strip()) < 10:
-        errors.append("English back-translation is required (min 10 characters)")
+        errors.append("Back-translation is required (min 10 characters)")
     
     if errors:
         raise HTTPException(status_code=400, detail="; ".join(errors))
     
-    reference = translate_to_chinese(article_body)
+    # Only generate reference translation for English source
+    reference = ""
+    if source_lang == "en":
+        reference = translate_to_chinese(article_body)
     
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO sessions (article_title, article_url, article_body, chinese_translation, english_back_translation, reference_translation) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
-                (article_title, article_url, article_body, chinese_translation, english_back_translation, reference),
+                """INSERT INTO sessions 
+                    (article_title, article_url, article_body, chinese_translation, 
+                     english_back_translation, reference_translation, source_type, source_lang, target_lang) 
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (article_title, article_url, article_body, chinese_translation, 
+                 english_back_translation, reference, source_type, source_lang, target_lang),
             )
             session_id = cur.fetchone()[0]
     
@@ -274,7 +318,9 @@ async def review(request: Request, session_id: int):
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT article_title, article_url, article_body, chinese_translation, english_back_translation, reference_translation FROM sessions WHERE id=%s",
+                """SELECT article_title, article_url, article_body, chinese_translation, 
+                    english_back_translation, reference_translation, source_type, source_lang, target_lang 
+                    FROM sessions WHERE id=%s""",
                 (session_id,)
             )
             row = cur.fetchone()
@@ -287,6 +333,9 @@ async def review(request: Request, session_id: int):
         "cn": row[3] or "—",
         "back_html": text_to_html(row[4] or ""),
         "ref": row[5],
+        "source_type": row[6],
+        "source_lang": row[7] or "en",
+        "target_lang": row[8] or "en",
     }
     return templates.TemplateResponse("review.html", {"request": request, "session": session})
 
@@ -317,11 +366,13 @@ async def history(request: Request):
                 latest AS (
                     SELECT DISTINCT ON (article_url)
                         id, article_title, article_url, article_body,
-                        chinese_translation, english_back_translation
+                        chinese_translation, english_back_translation,
+                        source_lang, target_lang
                     FROM sessions ORDER BY article_url, created_at DESC
                 )
                 SELECT l.id, l.article_title, l.article_url, l.article_body,
                        l.chinese_translation, l.english_back_translation,
+                       l.source_lang, l.target_lang,
                        c.times, c.last_date
                 FROM latest l JOIN counts c ON l.article_url = c.article_url
                 ORDER BY c.last_date DESC
@@ -329,7 +380,8 @@ async def history(request: Request):
             rows = cur.fetchall()
     sessions = [
         {"id": r[0], "title": r[1], "url": r[2], "body": r[3],
-         "cn": r[4], "en": r[5], "times": r[6], "date": r[7]}
+         "cn": r[4], "en": r[5], "source_lang": r[6] or "en", "target_lang": r[7] or "en",
+         "times": r[8], "date": r[9]}
         for r in rows
     ]
     stats = get_stats()

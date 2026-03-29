@@ -35,27 +35,30 @@
 <nav><a href="/">Practice</a><a href="/history">History</a></nav>
 
 <h1>{{ session.title }}</h1>
-<div class="source-link"><a href="{{ session.url }}" target="_blank">Read full article ↗</a></div>
+<div class="source-link">
+  {% if session.url %}<a href="{{ session.url }}" target="_blank">Read full article ↗</a>{% endif %}
+  <span style="margin-left: 12px; color: #888;">Source: {{ session.source_lang | upper }}</span>
+</div>
 
 <div class="compare-en">
   <div>
-    <div class="col-label">Original &nbsp;<span style="font-weight:normal;color:#aaa;">red = missed in your back-translation</span></div>
+    <div class="col-label">Original ({{ session.source_lang | upper }}) &nbsp;<span style="font-weight:normal;color:#aaa;">red = missed in back-translation</span></div>
     <div class="col-body">{{ session.body_html | safe }}</div>
   </div>
   <div>
-    <div class="col-label">Your English back-translation</div>
+    <div class="col-label">Your back-translation ({{ session.target_lang | upper }})</div>
     <div class="col-body">{{ session.back_html | safe }}</div>
   </div>
 </div>
 
 <div class="compare-cn">
   <div>
-    <div class="col-label">你的中文翻译</div>
+    <div class="col-label">Chinese Translation</div>
     <div class="col-body">{{ session.cn }}</div>
   </div>
   {% if session.ref %}
   <div>
-    <div class="col-label">参考译文（机器翻译）</div>
+    <div class="col-label">Reference Translation (Machine)</div>
     <div class="ref-body">{{ session.ref }}</div>
   </div>
   {% endif %}

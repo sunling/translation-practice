@@ -24,13 +24,29 @@
   .listen-btn { font-family: sans-serif; font-size: 13px; cursor: pointer; border: 1px solid #ddd; border-radius: 4px; padding: 5px 14px; background: #fff; color: #555; margin-top: 10px; }
   .listen-btn:hover { background: #f5f5f5; }
   .listen-btn.playing { border-color: #999; color: #222; background: #f0f0f0; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 1px solid #eee; padding-bottom: 12px; }
+  .tab { padding: 8px 16px; font-family: sans-serif; font-size: 14px; cursor: pointer; border: none; background: none; color: #555; border-radius: 4px; }
+  .tab:hover { background: #f5f5f5; }
+  .tab.active { background: #222; color: #fff; }
+  .upload-section { display: none; }
+  .upload-section.active { display: block; }
+  select { padding: 8px 12px; font-size: 14px; border: 1px solid #ddd; border-radius: 4px; background: #fff; margin-bottom: 12px; }
+  .lang-label { font-family: sans-serif; font-size: 12px; color: #888; margin-bottom: 4px; display: block; }
 </style>
 </head>
 <body>
 <nav><a href="/">Practice</a><a href="/history">History</a></nav>
 
+<div class="tabs">
+  <button class="tab active" onclick="showTab('random')">Random Article</button>
+  <button class="tab" onclick="showTab('upload')">Upload Your Own</button>
+</div>
+
+<div id="random-section" class="upload-section active">
 {% if article %}
 <form method="post" action="/submit">
+  <input type="hidden" name="source_type" value="guardian">
+  <input type="hidden" name="source_lang" value="en">
 
   <div class="step-label"><span class="step-num">1</span> Read aloud</div>
   <div class="read-box">Read this passage out loud — slowly, at least once. Don't skip it.</div>
@@ -44,11 +60,11 @@
   <input type="hidden" name="article_url" value="{{ article.url }}">
   <input type="hidden" name="article_body" value="{{ article.body }}">
 
-  <div class="step-label"><span class="step-num">2</span> 翻译成中文</div>
-  <textarea name="chinese_translation" rows="7" placeholder="把上面这段话翻译成中文...">{{ prefill_cn | default('') }}</textarea>
+  <div class="step-label"><span class="step-num">2</span> Translate</div>
+  <textarea name="chinese_translation" rows="7" placeholder="Translate the article into Chinese...">{{ prefill_cn | default('') }}</textarea>
 
   <div class="step-label"><span class="step-num">3</span> Back to English</div>
-  <textarea name="english_back_translation" rows="7" placeholder="Now translate your Chinese version back into English — without looking at the original..."></textarea>
+  <textarea name="english_back_translation" rows="7" placeholder="Now translate your version back into English — without looking at the original..."></textarea>
 
   <div class="actions">
     <button type="submit">Save & finish ✓</button>
@@ -58,6 +74,44 @@
 {% else %}
 <p>Couldn't load an article. Check your internet connection and try refreshing.</p>
 {% endif %}
+</div>
+
+<div id="upload-section" class="upload-section">
+<form method="post" action="/submit">
+  <input type="hidden" name="source_type" value="manual">
+
+  <div class="step-label"><span class="step-num">1</span> Paste your article</div>
+  <div class="read-box">Paste any article in any language. Then translate it to Chinese, and back to your target language.</div>
+
+  <label class="lang-label">Source Language</label>
+  <select name="source_lang" id="source-lang">
+    <option value="en">English</option>
+    <option value="zh">Chinese (中文)</option>
+    <option value="ja">Japanese (日本語)</option>
+    <option value="ko">Korean (한국어)</option>
+    <option value="es">Spanish (Español)</option>
+    <option value="fr">French (Français)</option>
+    <option value="de">German (Deutsch)</option>
+    <option value="ru">Russian (Русский)</option>
+    <option value="other">Other</option>
+  </select>
+
+  <input type="text" name="article_title" placeholder="Article title (optional)" style="width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 15px;">
+
+  <textarea name="article_body" rows="10" placeholder="Paste article text here..." required></textarea>
+
+  <div class="step-label"><span class="step-num">2</span> Translate to Chinese</div>
+  <textarea name="chinese_translation" rows="7" placeholder="把文章翻译成中文..." required></textarea>
+
+  <div class="step-label"><span class="step-num">3</span> Back-translate</div>
+  <textarea name="english_back_translation" rows="7" placeholder="Translate back to the original language (or your target language) without looking at the original..." required></textarea>
+
+  <div class="actions">
+    <button type="submit">Save & finish ✓</button>
+    <a href="/"><button type="button" class="another">Cancel</button></a>
+  </div>
+</form>
+</div>
 <script>
   function toggleListen() {
     const btn = document.getElementById('listen-btn');
@@ -78,6 +132,19 @@
     btn.textContent = '■ Stop';
     btn.classList.add('playing');
     speechSynthesis.speak(utter);
+  }
+
+  function showTab(tab) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.upload-section').forEach(s => s.classList.remove('active'));
+
+    if (tab === 'random') {
+      document.querySelector('.tab:first-child').classList.add('active');
+      document.getElementById('random-section').classList.add('active');
+    } else {
+      document.querySelector('.tab:last-child').classList.add('active');
+      document.getElementById('upload-section').classList.add('active');
+    }
   }
 </script>
 </body>

@@ -57,10 +57,10 @@
         <a class="practice-again" href="/practice-again/{{ s.id }}">Practice again →</a>
       </div>
     </div>
-    <div class="title"><a href="{{ s.url }}" target="_blank">{{ s.title }} ↗</a></div>
-    <div class="section-label">中文翻译</div>
+    <div class="title">{% if s.url %}<a href="{{ s.url }}" target="_blank">{{ s.title }} ↗</a>{% else %}{{ s.title or 'Untitled' }}{% endif %} <span style="font-size: 12px; color: #888; font-weight: normal;">[{{ s.source_lang | upper }}]</span></div>
+    <div class="section-label">Chinese Translation</div>
     <div class="translation">{{ s.cn or '—' }}</div>
-    <div class="section-label">English back-translation</div>
+    <div class="section-label">Back-translation ({{ s.target_lang | upper }})</div>
     <div class="translation">{{ s.en or '—' }}</div>
   </div>
   {% endfor %}
