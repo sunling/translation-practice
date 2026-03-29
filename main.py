@@ -24,38 +24,20 @@ except FileNotFoundError:
     pass  # No .env file present
 
 import psycopg2
-from psycopg2 import pool
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 GUARDIAN_API_KEY = os.environ.get("GUARDIAN_API_KEY", "test")
 
-# Initialize connection pool
-db_pool = None
-if DATABASE_URL:
-    try:
-        db_pool = psycopg2.pool.SimpleConnectionPool(1, 10, DATABASE_URL)
-        print(f"Database pool initialized with URL: {DATABASE_URL[:30]}...")
-    except Exception as e:
-        print(f"Failed to initialize database pool: {e}")
-        db_pool = None
-else:
+if not DATABASE_URL:
     print("WARNING: DATABASE_URL not set. Running without database.")
 
 def get_conn():
-    if db_pool:
-        conn = db_pool.getconn()
-        # Ensure Unicode encoding for Chinese/Japanese characters
-        conn.set_client_encoding('UTF8')
-        return conn
     conn = psycopg2.connect(DATABASE_URL)
     conn.set_client_encoding('UTF8')
     return conn
 
 def release_conn(conn):
-    if db_pool:
-        db_pool.putconn(conn)
-    else:
-        conn.close()
+    conn.close()
 
 @contextmanager
 def get_db():
