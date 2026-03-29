@@ -3,55 +3,110 @@ import random
 import requests
 import re
 from pathlib import Path
-from fastapi import FastAPI, Request, Form
+from contextlib import contextmanager
+from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-import psycopg2
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
-app = FastAPI()
-templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+# Load .env file manually (no python-dotenv dependency)
+import os as _os
+_env_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".env")
+try:
+    with open(_env_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if '=' in line and not line.startswith('#'):
+                key, value = line.split('=', 1)
+                _os.environ[key] = value
+except FileNotFoundError:
+    pass  # No .env file present
+
+import psycopg2
+from psycopg2 import pool
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
+GUARDIAN_API_KEY = os.environ.get("GUARDIAN_API_KEY", "test")
+
+# Initialize connection pool
+db_pool = None
+if DATABASE_URL:
+    try:
+        db_pool = psycopg2.pool.SimpleConnectionPool(1, 10, DATABASE_URL)
+    except Exception:
+        db_pool = None
+
+def get_conn():
+    if db_pool:
+        return db_pool.getconn()
+    return psycopg2.connect(DATABASE_URL)
+
+def release_conn(conn):
+    if db_pool:
+        db_pool.putconn(conn)
+    else:
+        conn.close()
+
+@contextmanager
+def get_db():
+    """Context manager for database connections."""
+    conn = get_conn()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        release_conn(conn)
 
 GUARDIAN_URL = (
     "https://content.guardianapis.com/search"
     "?show-fields=body,headline"
-    "&api-key=test&page-size=20"
+    f"&api-key={GUARDIAN_API_KEY}&page-size=20"
     "&section=lifeandstyle|food|travel|culture|science|environment"
     "&order-by=newest"
 )
 
-def get_conn():
-    return psycopg2.connect(DATABASE_URL)
-
+# Initialize FastAPI with lifespan
 def init_db():
-    conn = get_conn()
+    """Initialize database tables."""
+    if not DATABASE_URL:
+        return
     try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS sessions (
-                    id SERIAL PRIMARY KEY,
-                    article_title TEXT,
-                    article_url TEXT,
-                    article_body TEXT,
-                    chinese_translation TEXT,
-                    english_back_translation TEXT,
-                    reference_translation TEXT,
-                    created_at TIMESTAMP DEFAULT NOW()
-                )
-            """)
-        conn.commit()
-    finally:
-        conn.close()
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS sessions (
+                        id SERIAL PRIMARY KEY,
+                        article_title TEXT,
+                        article_url TEXT,
+                        article_body TEXT,
+                        chinese_translation TEXT,
+                        english_back_translation TEXT,
+                        reference_translation TEXT,
+                        created_at TIMESTAMP DEFAULT NOW()
+                    )
+                """)
+    except Exception as e:
+        print(f"Database initialization error: {e}")
+
+app = FastAPI()
+templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "Invalid input. Please check your submission."}
+    )
 
 def get_stats():
-    conn = get_conn()
-    try:
+    with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT DATE(created_at) as d FROM sessions ORDER BY d DESC")
             rows = cur.fetchall()
-    finally:
-        conn.close()
     import datetime as dt
     dates = [str(r[0]) for r in rows]
     total = len(dates)
@@ -89,21 +144,41 @@ def extract_passage(text, target_words=80):
                 break
     return "\n\n".join(kept)
 
+FALLBACK_ARTICLES = [
+    {
+        "title": "The Art of Translation",
+        "url": "https://example.com/translation",
+        "body": "Translation is not merely about converting words from one language to another. It is about capturing the essence, the nuance, and the cultural context that gives meaning to the original text. A good translator must understand both the source and target cultures deeply."
+    },
+    {
+        "title": "Learning Through Practice",
+        "url": "https://example.com/practice",
+        "body": "Language learning requires consistent practice. The more you engage with the language, the more natural it becomes. Reading aloud, translating, and back-translating are excellent methods for improving fluency and understanding."
+    }
+]
+
 def fetch_article():
+    """Fetch a random article from The Guardian API with fallback."""
     try:
         resp = requests.get(GUARDIAN_URL, timeout=10)
+        resp.raise_for_status()
         data = resp.json()
+        
+        if data.get("response", {}).get("status") != "ok":
+            raise ValueError(f"API error: {data.get('response', {}).get('message', 'Unknown error')}")
+        
         results = [
             r for r in data["response"]["results"]
             if r.get("fields", {}).get("body")
         ]
         if not results:
-            return None
+            return random.choice(FALLBACK_ARTICLES)
+        
         article = random.choice(results)
         raw = article["fields"]["body"]
         import html as html_module
         body = re.sub(r"</p>", "\n\n", raw, flags=re.IGNORECASE)
-        body = re.sub(r"<[^>]+>", "", body)
+        body = re.sub(r"<[^>]+", "", body)
         body = html_module.unescape(body)
         body = re.sub(r"\n{3,}", "\n\n", body).strip()
         body = extract_passage(body)
@@ -112,16 +187,21 @@ def fetch_article():
             "url": article.get("webUrl", ""),
             "body": body,
         }
+    except requests.RequestException:
+        return random.choice(FALLBACK_ARTICLES)
     except Exception as e:
-        return {"title": "Failed to load article", "url": "", "body": str(e)}
+        return random.choice(FALLBACK_ARTICLES)
 
 def translate_to_chinese(text):
+    """Translate text to Chinese with error handling."""
     try:
         from deep_translator import GoogleTranslator
-        return GoogleTranslator(source="en", target="zh-CN").translate(text[:4500])
-    except Exception:
-        return ""
+        result = GoogleTranslator(source="en", target="zh-CN").translate(text[:4500])
+        return result if result else "(Translation service unavailable)"
+    except Exception as e:
+        return f"(Translation failed: {str(e)[:50]})"
 
+# Initialize database on startup
 init_db()
 
 @app.get("/", response_class=HTMLResponse)
@@ -137,18 +217,28 @@ async def submit(
     chinese_translation: str = Form(""),
     english_back_translation: str = Form(""),
 ):
+    # Validation
+    errors = []
+    if not article_body or len(article_body.strip()) < 10:
+        errors.append("Article body is required (min 10 characters)")
+    if not chinese_translation or len(chinese_translation.strip()) < 5:
+        errors.append("Chinese translation is required (min 5 characters)")
+    if not english_back_translation or len(english_back_translation.strip()) < 10:
+        errors.append("English back-translation is required (min 10 characters)")
+    
+    if errors:
+        raise HTTPException(status_code=400, detail="; ".join(errors))
+    
     reference = translate_to_chinese(article_body)
-    conn = get_conn()
-    try:
+    
+    with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO sessions (article_title, article_url, article_body, chinese_translation, english_back_translation, reference_translation) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
                 (article_title, article_url, article_body, chinese_translation, english_back_translation, reference),
             )
             session_id = cur.fetchone()[0]
-        conn.commit()
-    finally:
-        conn.close()
+    
     return RedirectResponse(f"/review/{session_id}", status_code=303)
 
 STOP_WORDS = {
@@ -181,16 +271,14 @@ def text_to_html(text):
 
 @app.get("/review/{session_id}", response_class=HTMLResponse)
 async def review(request: Request, session_id: int):
-    conn = get_conn()
-    try:
+    with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT article_title, article_url, article_body, chinese_translation, english_back_translation, reference_translation FROM sessions WHERE id=%s",
                 (session_id,)
             )
             row = cur.fetchone()
-    finally:
-        conn.close()
+    
     if not row:
         return RedirectResponse("/history")
     session = {
@@ -204,16 +292,14 @@ async def review(request: Request, session_id: int):
 
 @app.get("/practice-again/{session_id}", response_class=HTMLResponse)
 async def practice_again(request: Request, session_id: int):
-    conn = get_conn()
-    try:
+    with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT article_title, article_url, article_body, reference_translation FROM sessions WHERE id=%s",
                 (session_id,)
             )
             row = cur.fetchone()
-    finally:
-        conn.close()
+    
     if not row:
         return RedirectResponse("/")
     article = {"title": row[0], "url": row[1], "body": row[2]}
@@ -221,8 +307,7 @@ async def practice_again(request: Request, session_id: int):
 
 @app.get("/history", response_class=HTMLResponse)
 async def history(request: Request):
-    conn = get_conn()
-    try:
+    with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute("""
                 WITH counts AS (
@@ -242,8 +327,6 @@ async def history(request: Request):
                 ORDER BY c.last_date DESC
             """)
             rows = cur.fetchall()
-    finally:
-        conn.close()
     sessions = [
         {"id": r[0], "title": r[1], "url": r[2], "body": r[3],
          "cn": r[4], "en": r[5], "times": r[6], "date": r[7]}
