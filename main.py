@@ -26,7 +26,6 @@ except FileNotFoundError:
 import psycopg2
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
-GUARDIAN_API_KEY = os.environ.get("GUARDIAN_API_KEY", "test")
 
 if not DATABASE_URL:
     print("WARNING: DATABASE_URL not set. Running without database.")
@@ -52,13 +51,9 @@ def get_db():
     finally:
         release_conn(conn)
 
-GUARDIAN_URL = (
-    "https://content.guardianapis.com/search"
-    "?show-fields=body,headline"
-    f"&api-key={GUARDIAN_API_KEY}&page-size=20"
-    "&section=lifeandstyle|food|travel|culture|science|environment"
-    "&order-by=newest"
-)
+WIKIPEDIA_RANDOM_URL = "https://en.wikipedia.org/api/rest_v1/page/random/summary"
+WIKIPEDIA_API_URL = "https://en.wikipedia.org/w/api.php"
+WIKIPEDIA_HEADERS = {"User-Agent": "translation-practice/1.0 (https://github.com/sunling/translation-practice)"}
 
 # Initialize FastAPI with lifespan
 def init_db():
@@ -174,38 +169,32 @@ FALLBACK_ARTICLES = [
 ]
 
 def fetch_article():
-    """Fetch a random article from The Guardian API with fallback."""
+    """Fetch a random article from Wikipedia with fallback."""
     try:
-        resp = requests.get(GUARDIAN_URL, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        
-        if data.get("response", {}).get("status") != "ok":
-            raise ValueError(f"API error: {data.get('response', {}).get('message', 'Unknown error')}")
-        
-        results = [
-            r for r in data["response"]["results"]
-            if r.get("fields", {}).get("body")
-        ]
-        if not results:
+        summary = requests.get(WIKIPEDIA_RANDOM_URL, headers=WIKIPEDIA_HEADERS, timeout=10).json()
+        title = summary.get("title", "")
+        url = summary.get("content_urls", {}).get("desktop", {}).get("page", "")
+
+        content_resp = requests.get(WIKIPEDIA_API_URL, headers=WIKIPEDIA_HEADERS, timeout=10, params={
+            "action": "query",
+            "titles": title,
+            "prop": "extracts",
+            "explaintext": True,
+            "exsectionformat": "plain",
+            "format": "json",
+        })
+        content_resp.raise_for_status()
+        pages = content_resp.json().get("query", {}).get("pages", {})
+        page = next(iter(pages.values()))
+        raw_text = page.get("extract", "")
+
+        if not raw_text:
             return random.choice(FALLBACK_ARTICLES)
-        
-        article = random.choice(results)
-        raw = article["fields"]["body"]
-        import html as html_module
-        body = re.sub(r"</p>", "\n\n", raw, flags=re.IGNORECASE)
-        body = re.sub(r"<[^>]+>", "", body)
-        body = html_module.unescape(body)
-        body = re.sub(r"\n{3,}", "\n\n", body).strip()
-        body = extract_passage(body)
-        return {
-            "title": article["fields"].get("headline", article.get("webTitle", "")),
-            "url": article.get("webUrl", ""),
-            "body": body,
-        }
-    except requests.RequestException:
-        return random.choice(FALLBACK_ARTICLES)
+
+        body = extract_passage(raw_text)
+        return {"title": title, "url": url, "body": body}
     except Exception as e:
+        print(f"[fetch_article] failed: {e}")
         return random.choice(FALLBACK_ARTICLES)
 
 def translate_to_chinese(text):
