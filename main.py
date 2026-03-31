@@ -194,7 +194,7 @@ def fetch_article():
         raw = article["fields"]["body"]
         import html as html_module
         body = re.sub(r"</p>", "\n\n", raw, flags=re.IGNORECASE)
-        body = re.sub(r"<[^>]+", "", body)
+        body = re.sub(r"<[^>]+>", "", body)
         body = html_module.unescape(body)
         body = re.sub(r"\n{3,}", "\n\n", body).strip()
         body = extract_passage(body)
